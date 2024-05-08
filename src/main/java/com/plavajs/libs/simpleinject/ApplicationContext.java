@@ -36,7 +36,9 @@ public class ApplicationContext {
         if (parameterBean == null) {
             throw new MissingBeanException(String.format("No bean registered for class %s", clazz.getName()));
         }
-        return clazz.cast(parameterBean.getClass().cast(parameterBean).getInstance());
+        T instance = clazz.cast(parameterBean.getClass().cast(parameterBean).getInstance());
+        injectAnnotatedFields(instance, clazz);
+        return instance;
     }
 
     private static void registerBeans() {
@@ -188,47 +190,6 @@ public class ApplicationContext {
         return null;
     }
 
-//    private static void registerBeans_old() {
-//        Set<Class<?>> configurationClasses = ClassScanner.findClassesAnnotatedWith(SimpleConfiguration.class);
-//
-//        configurationClasses.stream()
-//                .flatMap(clazz -> Arrays.stream(clazz.getDeclaredMethods()))
-//                .map(ApplicationContext::createNewBean)
-//                .forEach(BEANS::add);
-//    }
-//
-//    private static Bean createNewBean(Method method) {
-//        Class<?> returnType = method.getReturnType();
-//        String annotationValue = method.getAnnotation(SimpleBean.class).value();
-//        String beanId = annotationValue.isBlank() ? method.getName() : annotationValue;
-//        return new Bean(returnType, beanId);
-//    }
-//
-//    private static Bean createNewBean(Class<?> returnType) {
-//        String annotationValue = returnType.getAnnotation(SimpleComponent.class).value();
-//        String beanId = annotationValue.isBlank() ? getBeanIdFromClassName(returnType) : annotationValue;
-//        return new Bean(returnType, beanId);
-//    }
-//
-//
-//
-//    private static String getBeanIdFromClassName(Class<?> clazz) {
-//        char[] beanIdChars = clazz.getSimpleName().toCharArray();
-//        beanIdChars[0] = Character.toLowerCase(beanIdChars[0]);
-//        return new String(beanIdChars);
-//    }
-//
-//    private static void registerComponents_old() {
-//        Set<Class<?>> annotatedClasses = ClassScanner.findClassesAnnotatedWith(SimpleComponentScan.class);
-//
-//        resolveDistinctComponentScans(annotatedClasses)
-//                .forEach(clazz -> {
-//                    if (clazz.isAnnotationPresent(SimpleComponent.class)) {
-//                        COMPONENTS.put(clazz, createComponentInstance(clazz, new HashSet<>()));
-//                    }
-//                });
-//    }
-//
     private static Set<Class<?>> resolveDistinctComponentScans(Set<Class<?>> scanAnnotatedClass) {
         Set<SimpleComponentScan> recursive = new HashSet<>(
                 scanAnnotatedClass.stream()
@@ -255,43 +216,6 @@ public class ApplicationContext {
                 .flatMap(componentScan -> ClassScanner.findClassesInPackage(componentScan.value(), componentScan.recursively()).stream())
                 .collect(Collectors.toSet());
     }
-//
-//    private static Object createComponentInstance(Class<?> clazz, Set<Class<?>> classes) {
-//        classes.add(clazz);
-//        Constructor<?>[] constructors = clazz.getConstructors();
-//        if (constructors.length == 0) {
-//            throw new MissingPublicConstructorException(String.format("No public constructor found for class %s", clazz.getName()));
-//        }
-//
-//        Constructor<?> constructor = constructors[0];
-//        Class<?>[] parameterTypes = constructor.getParameterTypes();
-//
-//        List<Object> parameters = new LinkedList<>();
-//
-//        for (Class<?> parameterType : parameterTypes) {
-//            if (!parameterType.isAnnotationPresent(SimpleComponent.class)) {
-//                throw new MissingBeanException(String.format("No bean found for class %s", parameterType.getName()));
-//            }
-//
-//            Object parameter = COMPONENTS.get(parameterType);
-//            if (parameter == null) {
-//                if (classes.contains(parameterType)) {
-//                    String message = String.format("Cyclic dependency: %s", parameterType.getName());
-//                    throw new CyclicDependencyException(message);
-//                }
-//
-//                parameter = createComponentInstance(parameterType, classes);
-//                COMPONENTS.put(parameterType, parameter);
-//            }
-//            parameters.add(parameter);
-//        }
-//
-//        try {
-//            return constructor.newInstance(parameters.toArray());
-//        } catch (InstantiationException | IllegalAccessException | InvocationTargetException e) {
-//            throw new RuntimeException(e);
-//        }
-//    }
 
     private static <T> void injectAnnotatedFields(T object, Class<?> clazz) {
         Field[] declaredFields = clazz.getDeclaredFields();
