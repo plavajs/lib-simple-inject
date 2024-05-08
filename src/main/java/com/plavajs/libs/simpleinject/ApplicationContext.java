@@ -1,18 +1,15 @@
 package com.plavajs.libs.simpleinject;
 
 import com.plavajs.libs.simpleinject.annotation.*;
-import com.plavajs.libs.simpleinject.exception.CyclicDependenciesException;
-import com.plavajs.libs.simpleinject.exception.DuplicitBeanException;
-import com.plavajs.libs.simpleinject.exception.MissingBeanException;
-import com.plavajs.libs.simpleinject.exception.MissingPublicConstructorException;
+import com.plavajs.libs.simpleinject.exception.*;
+import com.plavajs.libs.simpleinject.model.AbstractBean;
+import com.plavajs.libs.simpleinject.model.Bean;
+import com.plavajs.libs.simpleinject.model.Component;
 import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 
-import java.lang.reflect.Constructor;
-import java.lang.reflect.Field;
-import java.lang.reflect.InvocationTargetException;
-import java.lang.reflect.Method;
+import java.lang.reflect.*;
 import java.util.*;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -21,7 +18,7 @@ import java.util.stream.Collectors;
 public class ApplicationContext {
 
     @Getter
-    private static final Map<Class<?>, Object> dependencies = new HashMap<>();
+    private static final List<Component> components = new ArrayList<>();
 
     @Getter
     private static final List<Bean> beans = new ArrayList<>();
@@ -30,81 +27,218 @@ public class ApplicationContext {
         ClassScanner.loadAllClasses();
         registerBeans();
         registerComponents();
+        validateCreateBeanComponentInstances();
     }
 
     public static  <T> T getInstance(Class<T> clazz) {
-        Object object = dependencies.get(clazz);
-        if (object != null) {
-            T instance = clazz.cast(object);
-            injectAnnotatedFields(instance, clazz);
-            return instance;
+        Bean foundBean = findBean(clazz);
+        AbstractBean parameterBean = foundBean == null ? findComponent(clazz) : foundBean;
+        if (parameterBean == null) {
+            throw new MissingBeanException(String.format("No bean registered for class %s", clazz.getName()));
         }
-
-        throw new MissingBeanException(String.format("No bean found for class %s", clazz.getName()));
+        return clazz.cast(parameterBean.getClass().cast(parameterBean).getInstance());
     }
 
-
     private static void registerBeans() {
-        Set<Class<?>> configurationClasses = ClassScanner.findClassesAnnotatedWith(SimpleConfiguration.class);
+        Set<Class<?>> configurationAnnotated = ClassScanner.findClassesAnnotatedWith(SimpleConfiguration.class);
 
-        configurationClasses.stream()
+        configurationAnnotated.stream()
+                .peek(ApplicationContext::validateConfigurationClass)
                 .flatMap(clazz -> Arrays.stream(clazz.getDeclaredMethods()))
-                .map(ApplicationContext::createNewBean)
+                .filter(method -> method.isAnnotationPresent(SimpleBean.class))
+                .peek(method -> {
+                    if (!Modifier.isStatic(method.getModifiers())) {
+                        throw new ConfigurationBeanMethodNotStaticException(
+                                String.format("Configuration 'SimpleBean' method must be static! (%s in %s)",
+                                        method.getName(), method.getClass().getName()));
+                    }
+                })
+                .map(method -> new Bean(method, method.getReturnType()))
+                .peek(ApplicationContext::validateDuplicitBean)
                 .forEach(beans::add);
     }
 
-    private static Bean createNewBean(Method method) {
-        Class<?> returnType = method.getReturnType();
-        String annotationValue = method.getAnnotation(SimpleBean.class).value();
-        String beanId = annotationValue.isBlank() ? method.getName() : annotationValue;
-        Object[] arguments = new Object[0];
-        Bean bean;
+    private static void validateConfigurationClass(Class<?> clazz) {
         try {
-            bean = new Bean(returnType, method.invoke(arguments), beanId);
-        } catch (IllegalAccessException | InvocationTargetException e) {
-            throw new RuntimeException(e);
+            Constructor<?> constructor = clazz.getConstructor();
+        } catch (NoSuchMethodException e) {
+            throw new MissingNoArgumentConstructorException(
+                    String.format("Configuration class must have a public constructor with no arguments! (%s)", clazz.getName()));
         }
-        validateNewBean(bean);
-        return bean;
+    }
+    
+    private static void registerComponents() {
+        Set<Class<?>> componentScanAnnotated = ClassScanner.findClassesAnnotatedWith(SimpleComponentScan.class);
+
+        resolveDistinctComponentScans(componentScanAnnotated).stream()
+                .filter(clazz -> clazz.isAnnotationPresent(SimpleComponent.class))
+                .map(Component::new)
+                .forEach(components::add);
     }
 
-    private static void validateNewBean(Bean bean) {
-        beans.forEach(existingBean -> {
-            if (existingBean.getType().equals(bean.getType()) && existingBean.getBeanId().equals(bean.getBeanId())) {
+    private static void validateDuplicitBean(Bean bean) {
+        beans.forEach(existingSimpleBean -> {
+            if (existingSimpleBean.getType().equals(bean.getType())) {
                 throw new DuplicitBeanException(
-                        String.format("There is already a bean for type %s with ID %s registered",
-                                bean.getType().getName(), bean.getBeanId()));
+                        String.format("There is already a bean registered for type %s",
+                                bean.getType().getName()));
             }
         });
     }
 
-    private static String getBeanIdFromMethodName(Class<?> clazz) {
-        char[] beanIdChars = clazz.getSimpleName().toCharArray();
-        beanIdChars[0] = Character.toLowerCase(beanIdChars[0]);
-        return new String(beanIdChars);
+    private static void validateCreateBeanComponentInstances() {
+        List<AbstractBean> allBeans = new ArrayList<>(beans);
+        allBeans.addAll(components);
+        allBeans.forEach(bean -> bean.setInstance(validateCreateBeanComponentInstance(bean, new HashSet<>())));
     }
 
-    private static void registerComponents() {
-        Set<Class<?>> annotatedClasses = ClassScanner.findClassesAnnotatedWith(SimpleComponentScan.class);
+    private static Object validateCreateBeanComponentInstance(AbstractBean bean, Set<Class<?>> cache) {
+        if (bean instanceof Bean) {
+            return createBeanInstance((Bean) bean, cache);
+        } else {
+            return createComponentInstanceNew(bean.getType(), cache);
+        }
+    }
 
-        resolveDistinctComponentScans(annotatedClasses)
-                .forEach(clazz -> {
-                    if (clazz.isAnnotationPresent(SimpleComponent.class)) {
-                        dependencies.put(clazz, createComponentInstance(clazz, new HashSet<>()));
-                    }
+    private static Object createBeanInstance(Bean bean, Set<Class<?>> cache) {
+        Class<?> beanType = bean.getType();
+        Class<?>[] parameterTypes;
+        Method method = bean.getMethod();
+        cache.add(beanType);
+        parameterTypes = method.getParameterTypes();
+        List<Object> parameters = validateCollectParameters(cache, parameterTypes, beanType);
+        
+        try {
+            return bean.getMethod().invoke(parameters);
+        } catch (IllegalAccessException | InvocationTargetException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    private static Object createComponentInstanceNew(Class<?> beanType, Set<Class<?>> cache) {
+        Class<?>[] parameterTypes;
+        Constructor<?> constructor;
+        Constructor<?>[] allConstructors = beanType.getDeclaredConstructors();
+        if (allConstructors.length == 0) {
+            throw new MissingPublicConstructorException(String.format("No public constructor found for class %s", beanType.getName()));
+        }
+
+        List<Constructor<?>> beanConstructors = Arrays.stream(allConstructors)
+                .filter(allConstructor -> allConstructor.isAnnotationPresent(SimpleBean.class))
+                .toList();
+
+        if (beanConstructors.size() > 1) {
+            throw new MultipleBeanConstructorsException(
+                    String.format("Multiple 'SimpleBean' annotated constructors found for class %s", beanType.getName()));
+        }
+
+        constructor = beanConstructors.isEmpty() ? allConstructors[0] : beanConstructors.get(0);
+        parameterTypes = constructor.getParameterTypes();
+        List<Object> parameters = validateCollectParameters(cache, parameterTypes, beanType);
+        
+        try {
+            return constructor.newInstance(parameters.toArray());
+        } catch (InstantiationException | IllegalAccessException | InvocationTargetException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    private static List<Object> validateCollectParameters(Set<Class<?>> cache, Class<?>[] parameterTypes, Class<?> beanType) {
+        List<Object> parameters = new ArrayList<>();
+
+        Arrays.stream(parameterTypes)
+                .forEach(parameterType -> {
+                    AbstractBean parameterBean = validateFindBean(parameterType, cache);
+                    Object parameter = parameterBean.getInstance() == null ?
+                            createComponentInstanceNew(parameterBean.getType(), cache) : parameterBean.getInstance();
+
+                    parameters.add(parameter);
                 });
+        return parameters;
     }
 
-    private static Set<Class<?>> resolveDistinctComponentScans(Set<Class<?>> scanAnnotated) {
+    private static AbstractBean validateFindBean(Class<?> beanType, Set<Class<?>> cache) {
+        if (cache.contains(beanType)) {
+            throw new CyclicDependencyException(String.format("Cyclic dependency: %s", beanType.getName()));
+        }
+
+        Bean foundBean = findBean(beanType);
+        AbstractBean parameterBean = foundBean == null ? findComponent(beanType) : foundBean;
+        if (parameterBean == null) {
+            throw new MissingBeanException(String.format("No bean registered for class %s", beanType.getName()));
+        }
+        return parameterBean;
+    }
+
+    private static Bean findBean(Class<?> type) {
+        for (Bean bean : beans) {
+            if (bean.getType().equals(type)) {
+                return bean;
+            }
+        }
+        return null;
+    }
+
+    private static Component findComponent(Class<?> type) {
+        for (Component component : components) {
+            if (component.getType().equals(type)) {
+                return component;
+            }
+        }
+        return null;
+    }
+
+//    private static void registerBeans_old() {
+//        Set<Class<?>> configurationClasses = ClassScanner.findClassesAnnotatedWith(SimpleConfiguration.class);
+//
+//        configurationClasses.stream()
+//                .flatMap(clazz -> Arrays.stream(clazz.getDeclaredMethods()))
+//                .map(ApplicationContext::createNewBean)
+//                .forEach(BEANS::add);
+//    }
+//
+//    private static Bean createNewBean(Method method) {
+//        Class<?> returnType = method.getReturnType();
+//        String annotationValue = method.getAnnotation(SimpleBean.class).value();
+//        String beanId = annotationValue.isBlank() ? method.getName() : annotationValue;
+//        return new Bean(returnType, beanId);
+//    }
+//
+//    private static Bean createNewBean(Class<?> returnType) {
+//        String annotationValue = returnType.getAnnotation(SimpleComponent.class).value();
+//        String beanId = annotationValue.isBlank() ? getBeanIdFromClassName(returnType) : annotationValue;
+//        return new Bean(returnType, beanId);
+//    }
+//
+//
+//
+//    private static String getBeanIdFromClassName(Class<?> clazz) {
+//        char[] beanIdChars = clazz.getSimpleName().toCharArray();
+//        beanIdChars[0] = Character.toLowerCase(beanIdChars[0]);
+//        return new String(beanIdChars);
+//    }
+//
+//    private static void registerComponents_old() {
+//        Set<Class<?>> annotatedClasses = ClassScanner.findClassesAnnotatedWith(SimpleComponentScan.class);
+//
+//        resolveDistinctComponentScans(annotatedClasses)
+//                .forEach(clazz -> {
+//                    if (clazz.isAnnotationPresent(SimpleComponent.class)) {
+//                        COMPONENTS.put(clazz, createComponentInstance(clazz, new HashSet<>()));
+//                    }
+//                });
+//    }
+//
+    private static Set<Class<?>> resolveDistinctComponentScans(Set<Class<?>> scanAnnotatedClass) {
         Set<SimpleComponentScan> recursive = new HashSet<>(
-                scanAnnotated.stream()
+                scanAnnotatedClass.stream()
                         .map(clazz -> clazz.getAnnotation(SimpleComponentScan.class))
                         .filter(SimpleComponentScan::recursively)
                         .collect(Collectors.toMap(SimpleComponentScan::value, Function.identity(), (a, b) -> a))
                         .values()
         );
 
-        Set<SimpleComponentScan> simple = scanAnnotated.stream()
+        Set<SimpleComponentScan> simple = scanAnnotatedClass.stream()
                 .map(clazz -> clazz.getAnnotation(SimpleComponentScan.class))
                 .filter(componentScan -> !componentScan.recursively())
                 .collect(Collectors.toSet());
@@ -121,60 +255,57 @@ public class ApplicationContext {
                 .flatMap(componentScan -> ClassScanner.findClassesInPackage(componentScan.value(), componentScan.recursively()).stream())
                 .collect(Collectors.toSet());
     }
+//
+//    private static Object createComponentInstance(Class<?> clazz, Set<Class<?>> classes) {
+//        classes.add(clazz);
+//        Constructor<?>[] constructors = clazz.getConstructors();
+//        if (constructors.length == 0) {
+//            throw new MissingPublicConstructorException(String.format("No public constructor found for class %s", clazz.getName()));
+//        }
+//
+//        Constructor<?> constructor = constructors[0];
+//        Class<?>[] parameterTypes = constructor.getParameterTypes();
+//
+//        List<Object> parameters = new LinkedList<>();
+//
+//        for (Class<?> parameterType : parameterTypes) {
+//            if (!parameterType.isAnnotationPresent(SimpleComponent.class)) {
+//                throw new MissingBeanException(String.format("No bean found for class %s", parameterType.getName()));
+//            }
+//
+//            Object parameter = COMPONENTS.get(parameterType);
+//            if (parameter == null) {
+//                if (classes.contains(parameterType)) {
+//                    String message = String.format("Cyclic dependency: %s", parameterType.getName());
+//                    throw new CyclicDependencyException(message);
+//                }
+//
+//                parameter = createComponentInstance(parameterType, classes);
+//                COMPONENTS.put(parameterType, parameter);
+//            }
+//            parameters.add(parameter);
+//        }
+//
+//        try {
+//            return constructor.newInstance(parameters.toArray());
+//        } catch (InstantiationException | IllegalAccessException | InvocationTargetException e) {
+//            throw new RuntimeException(e);
+//        }
+//    }
 
-    private static Object createComponentInstance(Class<?> clazz, Set<Class<?>> classes) {
-        classes.add(clazz);
-        Constructor<?>[] constructors = clazz.getConstructors();
-        if (constructors.length == 0) {
-            throw new MissingPublicConstructorException(String.format("No public constructor found for class %s", clazz.getName()));
-        }
-
-        Constructor<?> constructor = constructors[0];
-        Class<?>[] parameterTypes = constructor.getParameterTypes();
-
-        List<Object> parameters = new LinkedList<>();
-
-        for (Class<?> parameterType : parameterTypes) {
-            if (!parameterType.isAnnotationPresent(SimpleComponent.class)) {
-                throw new MissingBeanException(String.format("No bean found for class %s", parameterType.getName()));
-            }
-
-            Object parameter = dependencies.get(parameterType);
-            if (parameter == null) {
-                if (classes.contains(parameterType)) {
-                    String message = String.format("Cyclic dependency: %s", parameterType.getName());
-                    throw new CyclicDependenciesException(message);
-                }
-
-                parameter = createComponentInstance(parameterType, classes);
-                dependencies.put(parameterType, parameter);
-            }
-            parameters.add(parameter);
-        }
-
-        try {
-            return constructor.newInstance(parameters.toArray());
-        } catch (InstantiationException | IllegalAccessException | InvocationTargetException e) {
-            throw new RuntimeException(e);
-        }
-    }
-
-    private static  <T> void injectAnnotatedFields(T object, Class<?> clazz) {
+    private static <T> void injectAnnotatedFields(T object, Class<?> clazz) {
         Field[] declaredFields = clazz.getDeclaredFields();
         for (Field field : declaredFields) {
             if (field.isAnnotationPresent(SimpleInject.class)) {
                 field.setAccessible(true);
                 Class<?> parameterType = field.getType();
-                if (!parameterType.isAnnotationPresent(SimpleComponent.class)) {
-                    throw new MissingBeanException(String.format("No bean found for class %s", parameterType.getName()));
-                }
-                Object innerObject = parameterType.cast(dependencies.get(parameterType));
-
+                Object innerObject = getInstance(parameterType);
                 try {
                     if (innerObject == null) {
-                        innerObject = createComponentInstance(parameterType, new HashSet<>());
+//                        innerObject = createComponentInstanceNew(parameterType, new HashSet<>());
+                        throw new MissingBeanException(String.format("No bean found for class %s", parameterType.getName()));
                     }
-                    field.set(object, innerObject);
+                    field.set(object, parameterType.cast(innerObject));
                 } catch (IllegalAccessException e) {
                     throw new RuntimeException(e);
                 }

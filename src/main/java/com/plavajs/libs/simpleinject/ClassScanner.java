@@ -70,7 +70,9 @@ public class ClassScanner {
 
     public static Set<Class<?>> findClassesAnnotatedWith(Class<? extends Annotation> annotationClass) {
         Set<Class<?>> classes = findClassesInPackage("", true);
-        Set<Class<?>> filtered = classes.stream().filter(clazz -> clazz.isAnnotationPresent(annotationClass)).collect(Collectors.toSet());
+        Set<Class<?>> filtered = classes.stream()
+                .filter(clazz -> clazz.isAnnotationPresent(annotationClass))
+                .collect(Collectors.toSet());
         return filtered;
     }
 

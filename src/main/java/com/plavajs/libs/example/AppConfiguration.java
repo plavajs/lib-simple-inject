@@ -7,17 +7,17 @@ import com.plavajs.libs.simpleinject.annotation.SimpleConfiguration;
 public class AppConfiguration {
 
     @SimpleBean
-    public String someVar() {
+    public static String someVar() {
         return "abrakadabra";
     }
 
     @SimpleBean
-    public FourthClass fourthClass() {
+    public static FourthClass fourthClass() {
         return new FourthClass();
     }
 
-    @SimpleBean
-    public FourthClass fourthClassAAAA() {
-        return new FourthClass();
-    }
+//    @SimpleBean
+//    public FourthClass fourthClassAAAA() {
+//        return new FourthClass();
+//    }
 }
