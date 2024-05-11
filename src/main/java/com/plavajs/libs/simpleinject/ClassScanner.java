@@ -1,6 +1,7 @@
 package com.plavajs.libs.simpleinject;
 
-import lombok.Getter;
+import lombok.AccessLevel;
+import lombok.NoArgsConstructor;
 
 import java.io.*;
 import java.lang.annotation.Annotation;
@@ -8,12 +9,22 @@ import java.net.URL;
 import java.util.*;
 import java.util.stream.Collectors;
 
-public class ClassScanner {
+@NoArgsConstructor(access = AccessLevel.PRIVATE)
+final class ClassScanner {
 
-    @Getter
     private static final Set<Class<?>> allClasses = new HashSet<>();
 
-    public static Set<Class<?>> findClassesInPackage(String packageName, boolean recursively) {
+    static {
+        loadAllClasses();
+    }
+
+    static Set<Class<?>> findClassesAnnotatedWith(Class<? extends Annotation> annotationClass) {
+        return allClasses.stream()
+                .filter(clazz -> clazz.isAnnotationPresent(annotationClass))
+                .collect(Collectors.toSet());
+    }
+
+    static Set<Class<?>> findClassesInPackage(String packageName, boolean recursively) {
         return allClasses.stream()
                 .filter(clazz -> {
                     if (recursively) {
@@ -22,30 +33,9 @@ public class ClassScanner {
                     return clazz.getPackageName().equals(packageName);
                 })
                 .collect(Collectors.toSet());
-
-//
-//        Set<Class<?>> classes = new HashSet<>();
-//        ClassLoader classLoader = Thread.currentThread().getContextClassLoader();
-//
-//        Enumeration<URL> resources;
-//        try {
-//            resources = classLoader.getResources(packageName.replaceAll("[.]", "/"));
-//        } catch (IOException e) {
-//            throw new RuntimeException(e);
-//        }
-//
-//        while (resources.hasMoreElements()) {
-//            URL resourceUrl = resources.nextElement();
-//            if (resourceUrl.getProtocol().equals("file")) {
-//                File directory = new File(resourceUrl.getFile());
-//                scanDirectory(directory, packageName, classes);
-//            }
-//        }
-//
-//        return classes;
     }
 
-    static void loadAllClasses() {
+    private static void loadAllClasses() {
         Set<Class<?>> classes = new HashSet<>();
         ClassLoader classLoader = Thread.currentThread().getContextClassLoader();
         String packageName = "";
@@ -66,12 +56,6 @@ public class ClassScanner {
         }
 
         allClasses.addAll(classes);
-    }
-
-    public static Set<Class<?>> findClassesAnnotatedWith(Class<? extends Annotation> annotationClass) {
-        Set<Class<?>> classes = findClassesInPackage("", true);
-        Set<Class<?>> filtered = classes.stream().filter(clazz -> clazz.isAnnotationPresent(annotationClass)).collect(Collectors.toSet());
-        return filtered;
     }
 
     private static void scanDirectory(File directory, String packageName, Set<Class<?>> classes) {

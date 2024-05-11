@@ -1,12 +1,17 @@
 package com.plavajs.libs.simpleinject;
 
-import lombok.AllArgsConstructor;
+import lombok.AccessLevel;
 import lombok.Getter;
+import lombok.Setter;
 
-@AllArgsConstructor
-@Getter
-public class Bean {
+@Getter(AccessLevel.PACKAGE)
+class Bean {
+
     private final Class<?> type;
-    private final Object instance;
-    private final String beanId;
+    @Setter(AccessLevel.PACKAGE)
+    private Object instance;
+
+    public Bean(Class<?> type) {
+        this.type = type;
+    }
 }
