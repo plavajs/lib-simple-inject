@@ -15,7 +15,6 @@
 
         <lombok.version>1.18.32</lombok.version>
         <log4j.version>2.23.1</log4j.version>
-        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     </properties>
 
     <dependencies>
