@@ -1,17 +1,17 @@
 package com.plavajs.libs.simpleinject;
 
-import lombok.AccessLevel;
 import lombok.Getter;
 
 import java.lang.reflect.Method;
 
-@Getter(AccessLevel.PACKAGE)
-public final class SimpleBean extends Bean { //TODO make only package accessible
+@Getter
+final class SimpleBean extends Bean {
 
     private final Method method;
 
-    SimpleBean(Method method, Class<?> type) {
-        super(type);
+    SimpleBean(Method method) {
+        super(method.getReturnType());
         this.method = method;
+        setIdentifier(method.getAnnotation(com.plavajs.libs.simpleinject.annotation.SimpleBean.class).identifier());
     }
 }
