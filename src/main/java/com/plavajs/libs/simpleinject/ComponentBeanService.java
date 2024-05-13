@@ -3,12 +3,10 @@ package com.plavajs.libs.simpleinject;
 import com.plavajs.libs.simpleinject.annotation.SimpleBean;
 import com.plavajs.libs.simpleinject.annotation.SimpleComponent;
 import com.plavajs.libs.simpleinject.annotation.SimpleComponentScan;
-import com.plavajs.libs.simpleinject.exception.CyclicDependencyException;
 import com.plavajs.libs.simpleinject.exception.MissingPublicConstructorException;
 import com.plavajs.libs.simpleinject.exception.MultipleBeanConstructorsException;
 
 import java.lang.reflect.Constructor;
-import java.lang.reflect.InvocationTargetException;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
@@ -29,33 +27,23 @@ final class ComponentBeanService extends BeanService<ComponentBean> {
                 .collect(Collectors.toList());
     }
 
-    @Override
-    <B extends Bean> void setupInstance(B bean) {
-        validateBeanType(bean);
-        bean.setInstance(createInstance(bean, new HashSet<>()));
-    }
-
-    @Override
-    Object createInstance(Bean bean, Set<Class<?>> cache) {
-        validateBeanType(bean);
-
-        Class<?> beanType = bean.getType();
-        if (cache.contains(beanType)) {
-            throw new CyclicDependencyException(String.format("Cyclic dependency: %s", beanType.getName()));
+    static Constructor<?> validateGetComponentBeanConstructor(Class<?> type) {
+        Constructor<?>[] allConstructors = type.getDeclaredConstructors();
+        if (allConstructors.length == 0) {
+            throw new MissingPublicConstructorException(
+                    String.format("No public constructor found for class %s", type.getName()));
         }
-        cache.add(beanType);
 
-        Constructor<?> constructor = validateGetComponentBeanConstructor(beanType);
-        Class<?>[] parameterTypes = constructor.getParameterTypes();
-        Object[] parameters = validateCollectParameters(cache, parameterTypes);
+        List<Constructor<?>> beanConstructors = Arrays.stream(allConstructors)
+                .filter(allConstructor -> allConstructor.isAnnotationPresent(SimpleBean.class))
+                .toList();
 
-        try {
-            Object instance = constructor.newInstance(parameters);
-            injectAnnotatedFields(instance, beanType);
-            return instance;
-        } catch (InstantiationException | IllegalAccessException | InvocationTargetException e) {
-            throw new RuntimeException(e);
+        if (beanConstructors.size() > 1) {
+            throw new MultipleBeanConstructorsException(
+                    String.format("Multiple 'SimpleBean' annotated public constructors found for class %s", type.getName()));
         }
+
+        return beanConstructors.isEmpty() ? allConstructors[0] : beanConstructors.get(0);
     }
 
     private Set<Class<?>> resolveDistinctComponentScans(Set<Class<?>> scanAnnotatedClass) {
@@ -84,24 +72,5 @@ final class ComponentBeanService extends BeanService<ComponentBean> {
                 .flatMap(componentScan ->
                         ClassScanner.findClassesInPackage(componentScan.value(), componentScan.recursively()).stream())
                 .collect(Collectors.toSet());
-    }
-
-    private Constructor<?> validateGetComponentBeanConstructor(Class<?> componentBeanType) {
-        Constructor<?>[] allConstructors = componentBeanType.getDeclaredConstructors();
-        if (allConstructors.length == 0) {
-            throw new MissingPublicConstructorException(
-                    String.format("No public constructor found for class %s", componentBeanType.getName()));
-        }
-
-        List<Constructor<?>> beanConstructors = Arrays.stream(allConstructors)
-                .filter(allConstructor -> allConstructor.isAnnotationPresent(SimpleBean.class))
-                .toList();
-
-        if (beanConstructors.size() > 1) {
-            throw new MultipleBeanConstructorsException(
-                    String.format("Multiple 'SimpleBean' annotated public constructors found for class %s", componentBeanType.getName()));
-        }
-
-        return beanConstructors.isEmpty() ? allConstructors[0] : beanConstructors.get(0);
     }
 }

@@ -2,7 +2,6 @@ package com.plavajs.libs.simpleinject;
 
 import com.plavajs.libs.simpleinject.exception.*;
 import lombok.AccessLevel;
-import lombok.Getter;
 import lombok.NoArgsConstructor;
 
 import java.util.*;
@@ -10,12 +9,8 @@ import java.util.*;
 @NoArgsConstructor(access = AccessLevel.PRIVATE)
 public final class ApplicationContext {
 
-    @Getter //TODO make only package accessible
     private static final List<ComponentBean> componentsBeans;
-
-    @Getter //TODO make only package accessible
     private static final List<SimpleBean> simpleBeans;
-
     private static final SimpleBeanService simpleBeanService;
     private static final ComponentBeanService componentBeanService;
 
@@ -24,32 +19,53 @@ public final class ApplicationContext {
         componentBeanService = new ComponentBeanService();
         simpleBeans = simpleBeanService.getBeans();
         componentsBeans = componentBeanService.getBeans();
-        setupInstances();
+    }
+
+    public static <T> T getInstance(Class<T> clazz, String identifier) {
+        Bean bean = validateFindBean(clazz, identifier);
+        return clazz.cast(BeanService.createInstance(bean, new HashSet<>()));
     }
 
     public static <T> T getInstance(Class<T> clazz) {
-        Bean parameterBean = validateFindBean(clazz);
-        T instance = clazz.cast(parameterBean.getClass().cast(parameterBean).getInstance());
-        BeanService.injectAnnotatedFields(instance, clazz);
-        return instance;
+        return getInstance(clazz, "");
     }
 
-    static Bean validateFindBean(Class<?> beanType) {
-        for (SimpleBean bean : simpleBeans) {
-            if (bean.getType().equals(beanType)) {
-                return bean;
-            }
+    static Bean validateFindBean(Class<?> type, String identifier) {
+        List<Bean> foundBeans = getSimpleBeans(type, identifier);
+
+        if (foundBeans.size() > 1) {
+            throw new MultipleBeansException("This should not happen => bug in method 'ApplicationContext.validateFindBean()' !");
         }
-        for (ComponentBean component : componentsBeans) {
-            if (component.getType().equals(beanType)) {
-                return component;
-            }
+
+        if (foundBeans.isEmpty()) {
+            foundBeans = getComponentBeans(type, identifier);
         }
-        throw new MissingBeanException(String.format("No bean registered for class %s", beanType.getName()));
+
+        if (foundBeans.isEmpty()) {
+            String identifierMessage = identifier.isBlank() ? "a blank identifier" : String.format("identifier='%s'", identifier);
+            throw new MissingBeanException(String.format("No bean registered for class: %s and %s !",
+                    type.getName(),
+                    identifierMessage));
+        }
+
+        if (foundBeans.size() > 1) {
+            throw new MultipleBeansException("This should not happen => bug in method ApplicationContext.validateFindBean() !");
+        }
+
+        return foundBeans.get(0);
     }
 
-    private static void setupInstances() {
-        simpleBeans.forEach(simpleBeanService::setupInstance);
-        componentsBeans.forEach(componentBeanService::setupInstance);
+    private static List<Bean> getSimpleBeans(Class<?> type, String identifier) {
+        return new ArrayList<>(simpleBeans.stream()
+                .filter(bean -> bean.getType().equals(type))
+                .filter(bean -> bean.getIdentifier().equals(identifier))
+                .toList());
+    }
+
+    private static List<Bean> getComponentBeans(Class<?> type, String identifier) {
+        return new ArrayList<>(componentsBeans.stream()
+                .filter(bean -> bean.getType().equals(type))
+                .filter(bean -> bean.getIdentifier().equals(identifier))
+                .toList());
     }
 }

@@ -1,12 +1,12 @@
 package com.plavajs.libs.simpleinject;
 
+import com.plavajs.libs.simpleinject.annotation.SimpleBeanIdentifier;
 import com.plavajs.libs.simpleinject.annotation.SimpleInject;
-import com.plavajs.libs.simpleinject.exception.IncompatibleBeanTypeException;
+import com.plavajs.libs.simpleinject.exception.CyclicDependencyException;
 import com.plavajs.libs.simpleinject.exception.MissingBeanException;
 import lombok.Getter;
 
-import java.lang.reflect.Field;
-import java.lang.reflect.ParameterizedType;
+import java.lang.reflect.*;
 import java.util.*;
 
 @Getter
@@ -18,36 +18,59 @@ abstract class BeanService<T extends Bean> {
         beans = loadBeans();
     }
 
-    abstract Object createInstance(Bean bean, Set<Class<?>> cache);
-
     abstract <B extends Bean> List<B> loadBeans();
 
-    abstract <B extends Bean> void setupInstance(B bean);
+    static Object createInstance(Bean bean, Set<Class<?>> cache) {
+        Class<?> type = bean.getType();
+        if (cache.contains(type)) {
+            throw new CyclicDependencyException(String.format("Cyclic dependency: %s !", type.getName()));
+        }
+        cache.add(type);
 
-    Object[] validateCollectParameters(Set<Class<?>> cache, Class<?>[] parameterTypes) {
-        List<Object> parameters = new ArrayList<>();
-        Arrays.stream(parameterTypes)
-                .forEach(parameterType -> {
-                    Bean parameterBean = ApplicationContext.validateFindBean(parameterType);
-                    Object parameter = parameterBean.getInstance();
-                    if (parameter == null) {
-                        parameter = createInstance(parameterBean, cache);
-                        parameterBean.setInstance(parameter);
-                    }
+        Object instance;
+        if (bean instanceof SimpleBean simpleBean) {
+            Method method = simpleBean.getMethod();
+            Parameter[] parameters = method.getParameters();
+            Object[] parameterInstances = validateCollectParameters(cache, parameters);
 
-                    parameters.add(parameter);
-                });
-        return parameters.toArray();
+            try {
+                instance = method.invoke(null, parameterInstances);
+            } catch (IllegalAccessException | InvocationTargetException e) {
+                throw new RuntimeException(e);
+            }
+        } else {
+            Constructor<?> constructor = ComponentBeanService.validateGetComponentBeanConstructor(type);
+            Parameter[] parameters = constructor.getParameters();
+            Object[] parameterInstances = validateCollectParameters(cache, parameters);
+
+            try {
+                instance = constructor.newInstance(parameterInstances);
+            } catch (InstantiationException | IllegalAccessException | InvocationTargetException e) {
+                throw new RuntimeException(e);
+            }
+        }
+
+        injectAnnotatedFields(instance, type);
+        return instance;
     }
 
-    void validateBeanType(Bean bean) {
-        Class<?> type = (Class<?>) ((ParameterizedType) this.getClass().getGenericSuperclass()).getActualTypeArguments()[0];
-        if (!(type.isInstance(bean))) {
-            throw new IncompatibleBeanTypeException(
-                    String.format("Cannot create instance for bean of type %s from bean of type %s",
-                            type.getName(),
-                            bean.getClass().getName()));
-        }
+    static Object[] validateCollectParameters(Set<Class<?>> cache, Parameter[] parameters) {
+        List<Object> parameterInstances = new ArrayList<>();
+        Arrays.stream(parameters)
+                .forEach(parameter -> {
+                    SimpleBeanIdentifier identifierAnnotation = parameter.getAnnotation(SimpleBeanIdentifier.class);
+                    String identifier = identifierAnnotation == null ? "" : identifierAnnotation.value();
+                    Bean bean = ApplicationContext.validateFindBean(parameter.getType(), identifier);
+
+                    Object parameterInstance = bean.getInstance();
+                    if (parameterInstance == null) {
+                        parameterInstance = createInstance(bean, cache);
+                        bean.setInstance(parameterInstance);
+                    }
+
+                    parameterInstances.add(parameterInstance);
+                });
+        return parameterInstances.toArray();
     }
 
     static <T> void injectAnnotatedFields(T object, Class<?> clazz) {
@@ -55,17 +78,27 @@ abstract class BeanService<T extends Bean> {
         for (Field field : declaredFields) {
             if (field.isAnnotationPresent(SimpleInject.class)) {
                 field.setAccessible(true);
-                Class<?> parameterType = field.getType();
-                Object innerObject = ApplicationContext.getInstance(parameterType);
                 try {
-                    if (innerObject == null) {
-                        throw new MissingBeanException(String.format("No bean registered for class %s", parameterType.getName()));
+                    Object fieldInstance = field.get(object);
+                    if (fieldInstance == null) {
+                        Class<?> parameterType = field.getType();
+                        SimpleBeanIdentifier idAnnotation = field.getAnnotation(SimpleBeanIdentifier.class);
+                        String identifier = idAnnotation == null ? "" : idAnnotation.value();
+                        Object innerObject = ApplicationContext.getInstance(parameterType, identifier);
+
+                        if (innerObject == null) {
+                            String identifierMessage = identifier.isBlank() ? "a blank identifier" : String.format("identifier='%s'", identifier);
+                            throw new MissingBeanException(String.format("No bean registered for class: %s and %s !",
+                                    parameterType.getName(),
+                                    identifierMessage));
+                        }
+
+                        field.set(object, parameterType.cast(innerObject));
+                        injectAnnotatedFields(innerObject, parameterType);
                     }
-                    field.set(object, parameterType.cast(innerObject));
                 } catch (IllegalAccessException e) {
                     throw new RuntimeException(e);
                 }
-                injectAnnotatedFields(innerObject, parameterType);
             }
         }
     }
