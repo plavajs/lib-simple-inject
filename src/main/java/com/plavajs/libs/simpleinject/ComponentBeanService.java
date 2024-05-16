@@ -3,14 +3,13 @@ package com.plavajs.libs.simpleinject;
 import com.plavajs.libs.simpleinject.annotation.SimpleBean;
 import com.plavajs.libs.simpleinject.annotation.SimpleComponent;
 import com.plavajs.libs.simpleinject.annotation.SimpleComponentScan;
+import com.plavajs.libs.simpleinject.annotation.SimpleComponentScans;
 import com.plavajs.libs.simpleinject.exception.MissingPublicConstructorException;
 import com.plavajs.libs.simpleinject.exception.MultipleBeanConstructorsException;
+import com.plavajs.libs.simpleinject.exception.MultipleClassesAnnotatedException;
 
 import java.lang.reflect.Constructor;
-import java.util.Arrays;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Set;
+import java.util.*;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -19,9 +18,12 @@ final class ComponentBeanService extends BeanService<ComponentBean> {
     @Override
     @SuppressWarnings("unchecked")
     List<ComponentBean> loadBeans() {
-        Set<Class<?>> componentScanAnnotated = ClassScanner.findClassesAnnotatedWith(SimpleComponentScan.class);
+        Set<Class<?>> annotatedClasses = ClassScanner.findClassesAnnotatedWith(SimpleComponentScans.class);
+        annotatedClasses.addAll(ClassScanner.findClassesAnnotatedWith(SimpleComponentScan.class));
+        validateMultipleComponentScanClasses(annotatedClasses);
 
-        return resolveDistinctComponentScans(componentScanAnnotated).stream()
+        Class<?> componentScanAnnotatedClass = new ArrayList<>(annotatedClasses).get(0);
+        return resolveDistinctComponentScans(componentScanAnnotatedClass).stream()
                 .filter(clazz -> clazz.isAnnotationPresent(SimpleComponent.class))
                 .map(ComponentBean::new)
                 .collect(Collectors.toList());
@@ -46,17 +48,19 @@ final class ComponentBeanService extends BeanService<ComponentBean> {
         return beanConstructors.isEmpty() ? allConstructors[0] : beanConstructors.get(0);
     }
 
-    private Set<Class<?>> resolveDistinctComponentScans(Set<Class<?>> scanAnnotatedClass) {
-        Set<SimpleComponentScan> recursive = new HashSet<>(
-                scanAnnotatedClass.stream()
-                        .map(clazz -> clazz.getAnnotation(SimpleComponentScan.class))
+    private Set<Class<?>> resolveDistinctComponentScans(Class<?> scanAnnotatedClass) {
+        SimpleComponentScans componentScans = scanAnnotatedClass.getAnnotation(SimpleComponentScans.class);
+        if (componentScans == null) {
+            SimpleComponentScan componentScan = scanAnnotatedClass.getAnnotation(SimpleComponentScan.class);
+            return ClassScanner.findClassesInPackage(componentScan.value(), componentScan.recursively());
+        }
+
+        Set<SimpleComponentScan> recursive = new HashSet<>(Arrays.stream(componentScans.value())
                         .filter(SimpleComponentScan::recursively)
                         .collect(Collectors.toMap(SimpleComponentScan::value, Function.identity(), (a, b) -> a))
-                        .values()
-        );
+                        .values());
 
-        Set<SimpleComponentScan> simple = scanAnnotatedClass.stream()
-                .map(clazz -> clazz.getAnnotation(SimpleComponentScan.class))
+        Set<SimpleComponentScan> simple = Arrays.stream(componentScans.value())
                 .filter(componentScan -> !componentScan.recursively())
                 .collect(Collectors.toSet());
 
@@ -72,5 +76,17 @@ final class ComponentBeanService extends BeanService<ComponentBean> {
                 .flatMap(componentScan ->
                         ClassScanner.findClassesInPackage(componentScan.value(), componentScan.recursively()).stream())
                 .collect(Collectors.toSet());
+    }
+
+    private static void validateMultipleComponentScanClasses(Set<Class<?>> componentScanAnnotated) {
+        if (componentScanAnnotated.size() > 1) {
+            String classes = componentScanAnnotated.stream()
+                    .map(Class::getName)
+                    .collect(Collectors.joining("', '"));
+
+            throw new MultipleClassesAnnotatedException(String.format("Only one class annotated with '%s' allowed! ['%s']",
+                    SimpleComponentScan.class.getName(),
+                    classes));
+        }
     }
 }
