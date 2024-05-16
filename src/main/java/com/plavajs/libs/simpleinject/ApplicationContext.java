@@ -23,7 +23,10 @@ public final class ApplicationContext {
 
     public static <T> T getInstance(Class<T> clazz, String identifier) {
         Bean bean = validateFindBean(clazz, identifier);
-        return clazz.cast(BeanService.createInstance(bean, new HashSet<>()));
+        if (bean.getInstance() == null) {
+            return clazz.cast(BeanService.createInstance(bean, new HashSet<>()));
+        }
+        return clazz.cast(bean.getInstance());
     }
 
     public static <T> T getInstance(Class<T> clazz) {
@@ -31,14 +34,25 @@ public final class ApplicationContext {
     }
 
     static Bean validateFindBean(Class<?> type, String identifier) {
-        List<Bean> foundBeans = getSimpleBeans(type, identifier);
+        List<Bean> allBeansForType = getAllBeansForType(type);
+        if (allBeansForType.isEmpty()) {
+            throw new MissingBeanException(String.format("No bean registered for class: %s !", type.getName()));
+        }
+
+        List<Bean> foundBeans = allBeansForType.stream()
+                .filter(bean -> bean instanceof SimpleBean)
+                .filter(bean -> bean.getIdentifier().equals(identifier))
+                .toList();
 
         if (foundBeans.size() > 1) {
             throw new MultipleBeansException("This should not happen => bug in method 'ApplicationContext.validateFindBean()' !");
         }
 
         if (foundBeans.isEmpty()) {
-            foundBeans = getComponentBeans(type, identifier);
+            foundBeans = allBeansForType.stream()
+                    .filter(bean -> bean instanceof ComponentBean)
+                    .filter(bean -> bean.getIdentifier().equals(identifier))
+                    .toList();
         }
 
         if (foundBeans.isEmpty()) {
@@ -55,17 +69,11 @@ public final class ApplicationContext {
         return foundBeans.get(0);
     }
 
-    private static List<Bean> getSimpleBeans(Class<?> type, String identifier) {
-        return new ArrayList<>(simpleBeans.stream()
+    private static List<Bean> getAllBeansForType(Class<?> type) {
+        List<Bean> foundBeans = new ArrayList<>(simpleBeans);
+        foundBeans.addAll(componentsBeans);
+        return foundBeans.stream()
                 .filter(bean -> bean.getType().equals(type))
-                .filter(bean -> bean.getIdentifier().equals(identifier))
-                .toList());
-    }
-
-    private static List<Bean> getComponentBeans(Class<?> type, String identifier) {
-        return new ArrayList<>(componentsBeans.stream()
-                .filter(bean -> bean.getType().equals(type))
-                .filter(bean -> bean.getIdentifier().equals(identifier))
-                .toList());
+                .toList();
     }
 }
