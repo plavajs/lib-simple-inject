@@ -6,7 +6,7 @@ import java.lang.annotation.RetentionPolicy;
 import java.lang.annotation.Target;
 
 @Retention(RetentionPolicy.RUNTIME)
-@Target({ElementType.METHOD, ElementType.CONSTRUCTOR})
-public @interface SimpleBean {
-    String identifier() default "";
+@Target({ElementType.PARAMETER, ElementType.FIELD})
+public @interface SimpleBeanIdentifier {
+    String value() default "";
 }

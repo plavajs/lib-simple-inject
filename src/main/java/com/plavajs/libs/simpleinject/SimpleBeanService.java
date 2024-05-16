@@ -3,7 +3,6 @@ package com.plavajs.libs.simpleinject;
 import com.plavajs.libs.simpleinject.annotation.SimpleConfiguration;
 import com.plavajs.libs.simpleinject.exception.*;
 
-import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
 import java.util.*;
@@ -19,39 +18,10 @@ final class SimpleBeanService extends BeanService<SimpleBean> {
                 .flatMap(clazz -> Arrays.stream(clazz.getDeclaredMethods()))
                 .filter(method -> method.isAnnotationPresent(com.plavajs.libs.simpleinject.annotation.SimpleBean.class))
                 .peek(this::validateSimpleBeanMethod)
-                .map(method -> new SimpleBean(method, method.getReturnType()))
+                .map(SimpleBean::new)
                 .peek(this::validateDuplicitBean)
                 .forEach(beans::add);
         return beans;
-    }
-
-    @Override
-    <B extends Bean> void setupInstance(B bean) {
-        validateBeanType(bean);
-        bean.setInstance(createInstance(bean, new HashSet<>()));
-    }
-
-    @Override
-    Object createInstance(Bean bean, Set<Class<?>> cache) {
-        validateBeanType(bean);
-
-        Class<?> type = bean.getType();
-        if (cache.contains(type)) {
-            throw new CyclicDependencyException(String.format("Cyclic dependency: %s", type.getName()));
-        }
-        cache.add(type);
-
-        Method method = ((SimpleBean) bean).getMethod();
-        Class<?>[] parameterTypes = method.getParameterTypes();
-        Object[] parameters = validateCollectParameters(cache, parameterTypes);
-
-        try {
-            Object instance = method.invoke(null, parameters);
-            injectAnnotatedFields(instance, type);
-            return instance;
-        } catch (IllegalAccessException | InvocationTargetException e) {
-            throw new RuntimeException(e);
-        }
     }
 
     private void validateConfigurationClass(Class<?> clazz) {
@@ -67,15 +37,26 @@ final class SimpleBeanService extends BeanService<SimpleBean> {
         if (!Modifier.isStatic(method.getModifiers()) || !Modifier.isPublic(method.getModifiers())) {
             throw new ConfigBeanMethodNotPublicStaticException(
                     String.format("Configuration 'SimpleBean' annotated method must be public static! (%s in %s)",
-                            method.getName(), method.getClass().getName()));
+                            method.getName(),
+                            method.getClass().getName()));
         }
     }
 
     private void validateDuplicitBean(SimpleBean bean) {
-        beans.forEach(existingSimpleBean -> {
-            if (existingSimpleBean.getType().equals(bean.getType())) {
-                throw new DuplicitBeanException(
-                        String.format("There is already a bean registered for type %s", bean.getType().getName()));
+        String identifier = bean.getIdentifier();
+        beans.forEach(existingBean -> {
+            if (existingBean.getType().equals(bean.getType()) && existingBean.getIdentifier().equals(identifier)) {
+                String identifierMessage = identifier.isBlank() ? "With empty identifiers."
+                        : String.format("With identical identifiers (identifier='%s').", identifier);
+
+                throw new MultipleBeansException(
+                        String.format("%s For type: %s, method: '%s()' in: %s and method: '%s()' in: %s",
+                                identifierMessage,
+                                bean.getType().getName(),
+                                bean.getMethod().getName(),
+                                bean.getMethod().getDeclaringClass().getName(),
+                                existingBean.getMethod().getName(),
+                                existingBean.getMethod().getDeclaringClass().getName()));
             }
         });
     }
