@@ -10,7 +10,6 @@ import com.plavajs.libs.simpleinject.exception.MultipleClassesAnnotatedException
 
 import java.lang.reflect.Constructor;
 import java.util.*;
-import java.util.function.Function;
 import java.util.stream.Collectors;
 
 final class ComponentBeanService extends BeanService<ComponentBean> {
@@ -48,33 +47,59 @@ final class ComponentBeanService extends BeanService<ComponentBean> {
         return beanConstructors.isEmpty() ? allConstructors[0] : beanConstructors.get(0);
     }
 
-    private Set<Class<?>> resolveDistinctComponentScans(Class<?> scanAnnotatedClass) {
-        SimpleComponentScans componentScans = scanAnnotatedClass.getAnnotation(SimpleComponentScans.class);
-        if (componentScans == null) {
+    private static Set<Class<?>> resolveDistinctComponentScans(Class<?> scanAnnotatedClass) {
+        List<SimpleComponentScan> componentScans;
+        SimpleComponentScans wrappedComponentScans = scanAnnotatedClass.getAnnotation(SimpleComponentScans.class);
+        if (wrappedComponentScans != null) {
+            componentScans = new ArrayList<>(Arrays.stream(wrappedComponentScans.value()).toList());
+        } else {
             SimpleComponentScan componentScan = scanAnnotatedClass.getAnnotation(SimpleComponentScan.class);
-            return ClassScanner.findClassesInPackage(componentScan.value(), componentScan.recursively());
+            componentScans = List.of(componentScan);
         }
 
-        Set<SimpleComponentScan> recursive = new HashSet<>(Arrays.stream(componentScans.value())
-                        .filter(SimpleComponentScan::recursively)
-                        .collect(Collectors.toMap(SimpleComponentScan::value, Function.identity(), (a, b) -> a))
-                        .values());
+        Set<String> distinctRecursivePackages = resolveDistinctRecursivePackages(componentScans);
+        Set<String> distinctSimplePackages = resolveDistinctSimplePackages(componentScans, distinctRecursivePackages);
 
-        Set<SimpleComponentScan> simple = Arrays.stream(componentScans.value())
-                .filter(componentScan -> !componentScan.recursively())
+        return getClassesForDistinctPackages(distinctRecursivePackages, distinctSimplePackages);
+    }
+
+    private static Set<Class<?>> getClassesForDistinctPackages(Set<String> distinctRecursivePackages, Set<String> distinctSimplePackages) {
+        Map<String, Boolean> packagesMap = distinctRecursivePackages.stream()
+                .collect(Collectors.toMap(packageName -> packageName, packageName -> true));
+
+        packagesMap.putAll(distinctSimplePackages.stream()
+                .collect(Collectors.toMap(packageName -> packageName, packageName -> false)));
+
+        return packagesMap.entrySet().stream()
+                .flatMap(entry -> ClassScanner.findClassesInPackage(entry.getKey(), entry.getValue()).stream())
+                .collect(Collectors.toSet());
+    }
+
+    private static Set<String> resolveDistinctSimplePackages(List<SimpleComponentScan> componentScans, Set<String> distinctRecursivePackages) {
+        Set<String> simplePackages = componentScans.stream()
+                .filter(scan -> !scan.recursively())
+                .flatMap(scan -> Arrays.stream(scan.value()))
                 .collect(Collectors.toSet());
 
-        Set<SimpleComponentScan> distinctComponentScans = simple.stream()
-                .filter(simpleComponentScan -> recursive.stream()
-                        .noneMatch(recursiveComponentScan -> recursiveComponentScan.value().startsWith(simpleComponentScan.value()))
-                )
+        return simplePackages.stream()
+                .filter(packageName -> distinctRecursivePackages.stream().noneMatch(packageName::startsWith))
+                .collect(Collectors.toSet());
+    }
+
+    private static Set<String> resolveDistinctRecursivePackages(List<SimpleComponentScan> componentScans) {
+        Set<String> recursivePackages = componentScans.stream()
+                .filter(SimpleComponentScan::recursively)
+                .flatMap(scan -> Arrays.stream(scan.value()))
                 .collect(Collectors.toSet());
 
-        distinctComponentScans.addAll(recursive);
-
-        return distinctComponentScans.stream()
-                .flatMap(componentScan ->
-                        ClassScanner.findClassesInPackage(componentScan.value(), componentScan.recursively()).stream())
+        return new HashSet<>(recursivePackages).stream()
+                .filter(packageName -> recursivePackages.stream()
+                        .noneMatch(originalPackage -> {
+                            if (packageName.equals(originalPackage)) {
+                                return false;
+                            }
+                            return packageName.startsWith(originalPackage);
+                        }))
                 .collect(Collectors.toSet());
     }
 
