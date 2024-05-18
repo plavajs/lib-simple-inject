@@ -35,6 +35,13 @@ final class ClassScanner {
                 .collect(Collectors.toSet());
     }
 
+    static Set<String> getRootPackages() {
+        return allClasses.stream()
+                .map(Class::getPackageName)
+                .map(packageName -> packageName.substring(0, packageName.indexOf('.')))
+                .collect(Collectors.toSet());
+    }
+
     private static void loadAllClasses() {
         Set<Class<?>> classes = new HashSet<>();
         ClassLoader classLoader = Thread.currentThread().getContextClassLoader();
