@@ -1,5 +1,6 @@
 package com.plavajs.libs.simpleinject;
 
+import com.plavajs.libs.simpleinject.annotation.SimpleEagerInstances;
 import com.plavajs.libs.simpleinject.exception.*;
 import lombok.AccessLevel;
 import lombok.NoArgsConstructor;
@@ -19,6 +20,10 @@ public final class ApplicationContext {
         componentBeanService = new ComponentBeanService();
         simpleBeans = simpleBeanService.getBeans();
         componentsBeans = componentBeanService.getBeans();
+
+        if (isEagerInstances()) {
+            setupInstances();
+        }
     }
 
     public static <T> T getInstance(Class<T> clazz, String identifier) {
@@ -75,5 +80,22 @@ public final class ApplicationContext {
         return foundBeans.stream()
                 .filter(bean -> bean.getType().equals(type))
                 .toList();
+    }
+
+    private static boolean isEagerInstances() {
+        return !ClassScanner.findClassesAnnotatedWith(SimpleEagerInstances.class).isEmpty();
+    }
+
+    private static void setupInstances() {
+        simpleBeans.forEach(bean -> {
+            if (bean.getInstance() == null) {
+                bean.setInstance(SimpleBeanService.createInstance(bean, new HashSet<>()));
+            }
+        });
+        componentsBeans.forEach(bean -> {
+            if (bean.getInstance() == null) {
+                bean.setInstance(ComponentBeanService.createInstance(bean, new HashSet<>()));
+            }
+        });
     }
 }
