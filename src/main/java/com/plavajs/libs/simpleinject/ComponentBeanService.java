@@ -19,7 +19,7 @@ final class ComponentBeanService extends BeanService<ComponentBean> {
     List<ComponentBean> loadBeans() {
         Set<Class<?>> annotatedClasses = ClassScanner.findClassesAnnotatedWith(SimpleComponentScans.class);
         annotatedClasses.addAll(ClassScanner.findClassesAnnotatedWith(SimpleComponentScan.class));
-        validateMultipleComponentScanClasses(annotatedClasses);
+        validateSingleComponentScanClass(annotatedClasses);
 
         Class<?> componentScanAnnotatedClass = new ArrayList<>(annotatedClasses).get(0);
         return loadClassesInPackages(componentScanAnnotatedClass).stream()
@@ -111,7 +111,7 @@ final class ComponentBeanService extends BeanService<ComponentBean> {
                 .collect(Collectors.toSet());
     }
 
-    private static void validateMultipleComponentScanClasses(Set<Class<?>> componentScanAnnotated) {
+    private static void validateSingleComponentScanClass(Set<Class<?>> componentScanAnnotated) {
         if (componentScanAnnotated.size() > 1) {
             String classes = componentScanAnnotated.stream()
                     .map(Class::getName)
