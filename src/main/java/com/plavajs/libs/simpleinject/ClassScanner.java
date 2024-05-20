@@ -2,6 +2,7 @@ package com.plavajs.libs.simpleinject;
 
 import lombok.AccessLevel;
 import lombok.NoArgsConstructor;
+import lombok.extern.log4j.Log4j2;
 
 import java.io.*;
 import java.lang.annotation.Annotation;
@@ -9,6 +10,7 @@ import java.net.URL;
 import java.util.*;
 import java.util.stream.Collectors;
 
+@Log4j2
 @NoArgsConstructor(access = AccessLevel.PRIVATE)
 final class ClassScanner {
 
@@ -43,6 +45,7 @@ final class ClassScanner {
     }
 
     private static void loadAllClasses() {
+        if (log.isDebugEnabled()) log.debug("Loading all classes");
         Set<Class<?>> classes = new HashSet<>();
         ClassLoader classLoader = Thread.currentThread().getContextClassLoader();
         String packageName = "";
@@ -62,6 +65,7 @@ final class ClassScanner {
             }
         }
 
+        if (log.isDebugEnabled()) log.debug("Loaded {} classes", classes.size());
         allClasses.addAll(classes);
     }
 

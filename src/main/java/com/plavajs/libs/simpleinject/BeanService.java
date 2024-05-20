@@ -6,10 +6,12 @@ import com.plavajs.libs.simpleinject.exception.CyclicDependencyException;
 import com.plavajs.libs.simpleinject.exception.MissingBeanException;
 import com.plavajs.libs.simpleinject.exception.UnsupportedElementTypeException;
 import lombok.Getter;
+import lombok.extern.log4j.Log4j2;
 
 import java.lang.reflect.*;
 import java.util.*;
 
+@Log4j2
 @Getter
 abstract class BeanService<T extends Bean> {
 
@@ -28,39 +30,40 @@ abstract class BeanService<T extends Bean> {
         if (bean instanceof SimpleBean simpleBean) {
             Method method = simpleBean.getMethod();
             Parameter[] parameters = method.getParameters();
-            Object[] parameterInstances = validateCollectParametersInstances(parameters, cache);
+            Object[] parameterInstances = validateCollectParametersInstances(parameters, new HashSet<>(cache));
 
             try {
                 instance = method.invoke(null, parameterInstances);
             } catch (IllegalAccessException | InvocationTargetException e) {
+                log.error(e.getMessage());
                 throw new RuntimeException(e);
             }
         } else {
             Constructor<?> constructor = ComponentBeanService.validateGetComponentBeanConstructor(type);
             Parameter[] parameters = constructor.getParameters();
-            Object[] parameterInstances = validateCollectParametersInstances(parameters, cache);
+            Object[] parameterInstances = validateCollectParametersInstances(parameters, new HashSet<>(cache));
 
             try {
                 instance = constructor.newInstance(parameterInstances);
             } catch (InstantiationException | IllegalAccessException | InvocationTargetException e) {
+                log.error(e.getMessage());
                 throw new RuntimeException(e);
             }
         }
 
-        injectAnnotatedFields(instance, type, new HashSet<>());
+        injectAnnotatedFields(instance, type, new HashSet<>(cache));
         return instance;
     }
 
     static Object[] validateCollectParametersInstances(Parameter[] parameters, Set<Class<?>> cache) {
         List<Object> parameterInstances = new ArrayList<>(Arrays.stream(parameters)
-                .map(parameter -> getAnnotatedElementInstance(parameter, cache))
+                .map(parameter -> getElementInstance(parameter, cache))
                 .toList());
 
         return parameterInstances.toArray();
     }
 
     static <T> void injectAnnotatedFields(T object, Class<?> type, Set<Class<?>> cache) {
-        validateCacheDependency(type, cache);
         Field[] declaredFields = type.getDeclaredFields();
         Arrays.stream(declaredFields)
                 .filter(field -> field.isAnnotationPresent(SimpleInject.class))
@@ -73,19 +76,18 @@ abstract class BeanService<T extends Bean> {
             Object fieldInstance = field.get(object);
             if (fieldInstance == null) {
                 Class<?> parameterType = field.getType();
-                Object innerObject = getAnnotatedElementInstance(field, cache);
+                Object innerObject = getElementInstance(field, cache);
                 field.set(object, parameterType.cast(innerObject));
             }
         } catch (IllegalAccessException e) {
+            log.error(e.getMessage());
             throw new RuntimeException(e);
         }
     }
 
-    private static Object getAnnotatedElementInstance(AnnotatedElement element, Set<Class<?>> cache) {
+    private static Object getElementInstance(AnnotatedElement element, Set<Class<?>> cache) {
         Class<?> type = validateGetAnnotatedElementType(element);
-
-        SimpleBeanIdentifier identifierAnnotation = element.getAnnotation(SimpleBeanIdentifier.class);
-        String identifier = identifierAnnotation == null ? "" : identifierAnnotation.value();
+        String identifier = getElementIdentifier(element);
         Bean bean = ApplicationContext.validateFindBean(type, identifier);
         Object instance = bean.getInstance();
         if (instance == null) {
@@ -94,32 +96,49 @@ abstract class BeanService<T extends Bean> {
 
             if (instance == null) {
                 String identifierMessage = identifier.isBlank() ? "a blank identifier" : String.format("identifier='%s'", identifier);
-                throw new MissingBeanException(String.format("No bean registered for class: %s and %s !",
-                        type.getName(),
-                        identifierMessage));
+                String message = String.format("No bean registered for class: %s and %s !", type.getName(), identifierMessage);
+                log.error(message);
+                throw new MissingBeanException(message);
             }
         }
-
         return instance;
     }
 
-    private static Class<?> validateGetAnnotatedElementType(AnnotatedElement element) {
-        Class<?> type;
-        if (element instanceof Parameter parameter) {
-            type = parameter.getType();
-        } else if (element instanceof Field field) {
-            type = field.getType();
-        } else {
-            throw new UnsupportedElementTypeException(String.format("%s not supported. Must be %s or %s", element.getClass().getName(),
-                    Parameter.class.getName(),
-                    Field.class.getName()));
+    private static String getElementIdentifier(AnnotatedElement element) {
+        if (element instanceof Parameter) {
+            SimpleBeanIdentifier simpleBeanIdentifier = element.getAnnotation(SimpleBeanIdentifier.class);
+            if (simpleBeanIdentifier != null) return simpleBeanIdentifier.value();
+            return "";
         }
-        return type;
+
+        if (element instanceof Field) {
+            SimpleInject simpleInject = element.getAnnotation(SimpleInject.class);
+            if (simpleInject != null) return simpleInject.identifier();
+        }
+        return "";
+    }
+
+    private static Class<?> validateGetAnnotatedElementType(AnnotatedElement element) {
+        if (element instanceof Parameter parameter) {
+            return parameter.getType();
+        }
+
+        if (element instanceof Field field) {
+            return field.getType();
+        }
+
+        String message = String.format(
+                "%s not supported. Must be %s or %s", element.getClass().getName(), Parameter.class.getName(), Field.class.getName());
+
+        log.error(message);
+        throw new UnsupportedElementTypeException(message);
     }
 
     private static void validateCacheDependency(Class<?> type, Set<Class<?>> cache) {
         if (cache.contains(type)) {
-            throw new CyclicDependencyException(String.format("Cyclic dependency: %s !", type.getName()));
+            String message = String.format("Cyclic dependency: %s !", type.getName());
+            log.error(message);
+            throw new CyclicDependencyException(message);
         }
         cache.add(type);
     }

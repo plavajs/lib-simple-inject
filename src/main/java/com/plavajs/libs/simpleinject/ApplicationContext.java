@@ -1,12 +1,18 @@
 package com.plavajs.libs.simpleinject;
 
 import com.plavajs.libs.simpleinject.annotation.SimpleEagerInstances;
-import com.plavajs.libs.simpleinject.exception.*;
+import com.plavajs.libs.simpleinject.exception.MissingBeanException;
+import com.plavajs.libs.simpleinject.exception.MultipleBeansException;
 import lombok.AccessLevel;
+import lombok.Getter;
 import lombok.NoArgsConstructor;
+import lombok.extern.log4j.Log4j2;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.List;
 
+@Log4j2
 @NoArgsConstructor(access = AccessLevel.PRIVATE)
 public final class ApplicationContext {
 
@@ -21,21 +27,32 @@ public final class ApplicationContext {
         simpleBeans = simpleBeanService.getBeans();
         componentsBeans = componentBeanService.getBeans();
 
-        if (isEagerInstances()) {
+        boolean isEagerInstances = isEagerInstances();
+        if (log.isDebugEnabled()) log.debug("Eager instances: {}", String.valueOf(isEagerInstances).toUpperCase());
+        if (isEagerInstances) {
             setupInstances();
         }
     }
 
-    public static <T> T getInstance(Class<T> clazz, String identifier) {
-        Bean bean = validateFindBean(clazz, identifier);
+    /**
+     * @param type       the class of the type you want to return the instance of
+     * @param identifier the unique identifier of the bean you want to use for instantiation
+     * @return instance of the specified type
+     */
+    public static <T> T getInstance(Class<T> type, String identifier) {
+        Bean bean = validateFindBean(type, identifier);
         if (bean.getInstance() == null) {
-            return clazz.cast(BeanService.createInstance(bean, new HashSet<>()));
+            return type.cast(BeanService.createInstance(bean, new HashSet<>()));
         }
-        return clazz.cast(bean.getInstance());
+        return type.cast(bean.getInstance());
     }
 
-    public static <T> T getInstance(Class<T> clazz) {
-        return getInstance(clazz, "");
+    /**
+     * @param type the class of the type you want to return the instance of
+     * @return instance of the specified type
+     */
+    public static <T> T getInstance(Class<T> type) {
+        return getInstance(type, "");
     }
 
     static Bean validateFindBean(Class<?> type, String identifier) {
@@ -87,6 +104,7 @@ public final class ApplicationContext {
     }
 
     private static void setupInstances() {
+        if (log.isDebugEnabled()) log.debug("Setting up instances for all beans");
         simpleBeans.forEach(bean -> {
             if (bean.getInstance() == null) {
                 bean.setInstance(SimpleBeanService.createInstance(bean, new HashSet<>()));
@@ -97,5 +115,6 @@ public final class ApplicationContext {
                 bean.setInstance(ComponentBeanService.createInstance(bean, new HashSet<>()));
             }
         });
+        if (log.isDebugEnabled()) log.debug("All beans instantiated");
     }
 }
