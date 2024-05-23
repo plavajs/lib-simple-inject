@@ -28,19 +28,16 @@ final class ClassScanner {
 
     static Set<Class<?>> findClassesInPackage(String packageName, boolean recursively) {
         return allClasses.stream()
-                .filter(clazz -> {
-                    if (recursively) {
-                        return clazz.getPackageName().startsWith(packageName);
-                    }
-                    return clazz.getPackageName().equals(packageName);
-                })
+                .filter(clazz -> recursively ? clazz.getPackageName().startsWith(packageName) :
+                        clazz.getPackageName().equals(packageName))
                 .collect(Collectors.toSet());
     }
 
     static Set<String> getRootPackages() {
         return allClasses.stream()
                 .map(Class::getPackageName)
-                .map(packageName -> packageName.substring(0, packageName.indexOf('.')))
+                .map(packageName ->  packageName.indexOf('.') == -1 ? packageName :
+                        packageName.substring(0, packageName.indexOf('.')))
                 .collect(Collectors.toSet());
     }
 
@@ -78,13 +75,13 @@ final class ClassScanner {
                 String nextPackageName = packageName.isBlank() ? file.getName() : packageName + "." + file.getName();
                 scanDirectory(file, nextPackageName, classes);
             } else if (file.getName().endsWith(".class")) {
-                Class<?> clazz;
+                Class<?> type;
                 try {
-                    clazz = Class.forName(packageName + "." + file.getName().substring(0, file.getName().lastIndexOf('.')));
+                    type = Class.forName(packageName + "." + file.getName().substring(0, file.getName().lastIndexOf('.')));
                 } catch (ClassNotFoundException e) {
                     throw new RuntimeException(e);
                 }
-                classes.add(clazz);
+                classes.add(type);
             }
         }
     }

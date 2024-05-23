@@ -15,20 +15,20 @@ import java.util.*;
 @Getter
 abstract class BeanService<T extends Bean> {
 
-    List<T> beans;
+    Set<T> beans = new HashSet<>();
 
     BeanService() {
-        beans = loadBeans();
+        loadBeans();
     }
 
-    abstract <B extends Bean> List<B> loadBeans();
+    abstract void loadBeans();
 
     static Object createInstance(Bean bean, Set<Class<?>> cache) {
         Class<?> type = bean.getType();
         validateCacheDependency(type, cache);
         Object instance;
-        if (bean instanceof SimpleBean simpleBean) {
-            Method method = simpleBean.getMethod();
+        if (bean instanceof MethodBean methodBean) {
+            Method method = methodBean.getMethod();
             Parameter[] parameters = method.getParameters();
             Object[] parameterInstances = validateCollectParametersInstances(parameters, new HashSet<>(cache));
 
@@ -55,7 +55,7 @@ abstract class BeanService<T extends Bean> {
         return instance;
     }
 
-    static Object[] validateCollectParametersInstances(Parameter[] parameters, Set<Class<?>> cache) {
+    private static Object[] validateCollectParametersInstances(Parameter[] parameters, Set<Class<?>> cache) {
         List<Object> parameterInstances = new ArrayList<>(Arrays.stream(parameters)
                 .map(parameter -> getElementInstance(parameter, cache))
                 .toList());
@@ -63,14 +63,14 @@ abstract class BeanService<T extends Bean> {
         return parameterInstances.toArray();
     }
 
-    static <T> void injectAnnotatedFields(T object, Class<?> type, Set<Class<?>> cache) {
+    private static <O> void injectAnnotatedFields(O object, Class<?> type, Set<Class<?>> cache) {
         Field[] declaredFields = type.getDeclaredFields();
         Arrays.stream(declaredFields)
                 .filter(field -> field.isAnnotationPresent(SimpleInject.class))
                 .forEach(field -> injectAnnotatedField(object, field, cache));
     }
 
-    private static <T> void injectAnnotatedField(T object, Field field, Set<Class<?>> cache) {
+    private static <O> void injectAnnotatedField(O object, Field field, Set<Class<?>> cache) {
         field.setAccessible(true);
         try {
             Object fieldInstance = field.get(object);
@@ -96,7 +96,7 @@ abstract class BeanService<T extends Bean> {
 
             if (instance == null) {
                 String identifierMessage = identifier.isBlank() ? "a blank identifier" : String.format("identifier='%s'", identifier);
-                String message = String.format("No bean registered for class: %s and %s !", type.getName(), identifierMessage);
+                String message = String.format("No bean registered for type: %s and %s !", type.getName(), identifierMessage);
                 log.error(message);
                 throw new MissingBeanException(message);
             }
