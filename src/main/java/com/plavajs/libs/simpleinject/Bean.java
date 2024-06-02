@@ -28,6 +28,6 @@ abstract class Bean {
             return false;
         }
 
-        return type == bean.type && identifier.equals(bean.identifier);
+        return type.equals(bean.type) && identifier.equals(bean.identifier);
     }
 }
