@@ -23,9 +23,7 @@ final class ComponentBean extends Bean {
                 .toList();
 
         String identifier = "";
-        if (!annotatedConstructors.isEmpty()) {
-            identifier = annotatedConstructors.get(0).getAnnotation(SimpleBean.class).identifier();
-        }
+        if (!annotatedConstructors.isEmpty()) identifier = annotatedConstructors.get(0).getAnnotation(SimpleBean.class).identifier();
 
         return identifier.isBlank() ? getType().getAnnotation(SimpleComponent.class).identifier() : identifier;
     }

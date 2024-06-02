@@ -1,17 +1,18 @@
 package com.plavajs.libs.simpleinject;
 
+import com.plavajs.libs.simpleinject.annotation.SimpleBean;
 import lombok.Getter;
 
 import java.lang.reflect.Method;
 
 @Getter
-final class SimpleBean extends Bean {
+final class MethodBean extends Bean {
 
     private final Method method;
 
-    SimpleBean(Method method) {
+    MethodBean(Method method) {
         super(method.getReturnType());
         this.method = method;
-        setIdentifier(method.getAnnotation(com.plavajs.libs.simpleinject.annotation.SimpleBean.class).identifier());
+        setIdentifier(method.getAnnotation(SimpleBean.class).identifier());
     }
 }

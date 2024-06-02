@@ -6,6 +6,6 @@ import java.lang.annotation.*;
 @Target(ElementType.TYPE)
 @Repeatable(SimpleComponentScans.class)
 public @interface SimpleComponentScan {
-    String[] value() default "";
+    String[] packages() default "";
     boolean recursively() default true;
 }
