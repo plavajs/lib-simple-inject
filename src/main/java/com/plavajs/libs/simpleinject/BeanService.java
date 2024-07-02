@@ -18,7 +18,7 @@ abstract class BeanService<T extends Bean> {
     Set<T> beans = new HashSet<>();
 
     BeanService() {
-        loadBeans();
+//        loadBeans();
     }
 
     abstract void loadBeans();

@@ -18,18 +18,24 @@ public final class ApplicationContext {
 
     private static final MethodBeanService methodBeanService = new MethodBeanService();
     private static final ComponentBeanService componentBeanService = new ComponentBeanService();
-    private static final Set<ComponentBean> componentBeans;
-    private static final Set<MethodBean> methodBeans;
+    private static Set<ComponentBean> componentBeans;
+    private static Set<MethodBean> methodBeans;
+    private static boolean beansLoaded = false;
 
     static {
-        methodBeans = methodBeanService.getBeans();
-        componentBeans = componentBeanService.getBeans();
-
         boolean isEagerInstances = isEagerInstances();
         if (log.isDebugEnabled()) log.debug("Eager instances: {}", String.valueOf(isEagerInstances).toUpperCase());
         if (isEagerInstances) {
             setupInstances();
         }
+    }
+
+    private static void validateLoadBeans() {
+        componentBeanService.loadBeans();
+        componentBeans = componentBeanService.getBeans();
+        methodBeanService.loadBeans();
+        methodBeans = methodBeanService.getBeans();
+        beansLoaded = true;
     }
 
     /**
@@ -38,6 +44,8 @@ public final class ApplicationContext {
      * @return instance of the specified type
      */
     public static <T> T getInstance(Class<T> type, String identifier) {
+        if (!beansLoaded) validateLoadBeans();
+
         Bean bean = validateFindBean(type, identifier);
         if (bean.getInstance() == null) {
             return type.cast(BeanService.createInstance(bean, new HashSet<>()));
@@ -102,6 +110,8 @@ public final class ApplicationContext {
     }
 
     private static void setupInstances() {
+        if (!beansLoaded) validateLoadBeans();
+
         if (log.isDebugEnabled()) log.debug("Setting up instances for all beans");
         methodBeans.forEach(bean -> {
             if (bean.getInstance() == null) bean.setInstance(MethodBeanService.createInstance(bean, new HashSet<>()));
