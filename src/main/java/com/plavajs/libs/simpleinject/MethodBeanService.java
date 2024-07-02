@@ -24,7 +24,6 @@ final class MethodBeanService extends BeanService<MethodBean> {
 
         Set<MethodBean> beans = new HashSet<>();
         configurationClasses.stream()
-                .peek(this::validateConfigurationClass)
                 .flatMap(clazz -> Arrays.stream(clazz.getDeclaredMethods()))
                 .filter(method -> method.isAnnotationPresent(SimpleBean.class))
                 .peek(this::validateBeanMethod)
@@ -43,18 +42,6 @@ final class MethodBeanService extends BeanService<MethodBean> {
                     }).sorted().toList());
 
             log.debug(message);
-        }
-    }
-
-    private void validateConfigurationClass(Class<?> clazz) {
-        try {
-            clazz.getDeclaredConstructor();
-        } catch (NoSuchMethodException e) {
-            String message = String.format(
-                    "'SimpleConfiguration' class must have a public constructor with no arguments! [%s]", clazz.getName());
-
-            log.error(message);
-            throw new MissingPublicNoArgumentConstructorException(message);
         }
     }
 

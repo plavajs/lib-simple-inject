@@ -45,7 +45,7 @@ final class ComponentBeanService extends BeanService<ComponentBean> {
     }
 
     static Constructor<?> validateGetComponentBeanConstructor(Class<?> type) {
-        Constructor<?>[] allConstructors = type.getDeclaredConstructors();
+        Constructor<?>[] allConstructors = type.getConstructors();
         if (allConstructors.length == 0) {
             String message = String.format("No public constructor found for type: %s", type.getName());
             log.error(message);
